@@ -1,0 +1,20 @@
+# Hand-maintained mirror of the routing LOGIC in
+# tutorrclonegateway/patches/caddyfile, for fast live testing in CI
+# without going through Tutor's full rendering pipeline (test_patches.py
+# is what keeps the real, Jinja-templated patch honest). Bucket name and
+# ports are hardcoded to match docker-compose.ci.yml's defaults.
+:80 {
+    header Access-Control-Allow-Origin *
+    header Access-Control-Expose-Headers "Content-Range,Accept-Ranges,ETag"
+
+    @public_read {
+        method GET HEAD
+        path /openedx/*
+    }
+    handle @public_read {
+        reverse_proxy rclonegw-public:9000
+    }
+    handle {
+        reverse_proxy rclonegw:9000
+    }
+}

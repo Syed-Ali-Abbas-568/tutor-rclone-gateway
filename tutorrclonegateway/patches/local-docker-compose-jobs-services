@@ -1,0 +1,23 @@
+# Init/admin job container.
+#
+# Reuses the single pinned rclone image — rclone's own CLI is its own
+# admin client, unlike RustFS/MinIO which need a separate `rc`/`mc` image
+# because their server images ship no client at all.
+#
+# No `depends_on: rclonegw`: bucket (Azure container) creation talks
+# straight to Azure via the same `azureblob:` remote, not through either
+# gateway process, so only Azurite (when it's the active backend) needs to
+# be up first.
+#
+# The service name must be `<service>-job`, where `<service>` is the name
+# registered with CLI_DO_INIT_TASKS in plugin.py ("rclonegw") — Tutor
+# appends the `-job` suffix when it resolves the task.
+rclonegw-job:
+  image: {{ RCLONEGW_DOCKER_IMAGE }}
+  entrypoint: []
+  environment:
+    RCLONE_CONFIG_AZUREBLOB_TYPE: "azureblob"
+    RCLONE_CONFIG_AZUREBLOB_ACCOUNT: "{{ RCLONEGW_AZURE_ACCOUNT }}"
+    RCLONE_CONFIG_AZUREBLOB_KEY: "{{ RCLONEGW_AZURE_ACCOUNT_KEY }}"
+    RCLONE_CONFIG_AZUREBLOB_ENDPOINT: "{{ RCLONEGW_AZURE_ENDPOINT }}"
+  depends_on: ["azurite"]

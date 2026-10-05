@@ -1,0 +1,20 @@
+# Dev mode runs no Caddy at all, so the method+path routing that makes the
+# public bucket anonymously readable (see the caddyfile patch) cannot
+# exist here: only the authenticated gateway is reachable in dev mode.
+# This is the same category as tutor-rustfs's own dev-mode console-path
+# caveat — a documented limitation, not something to engineer around with
+# per-bucket endpoint overrides.
+#
+# rclonegw-public is still published (on a different host port) purely so
+# its --include/--read-only scoping can be tested directly in dev mode,
+# where there is no Caddy to get in the way of doing so.
+rclonegw:
+  ports:
+    - "127.0.0.1:9000:9000"
+  networks:
+    default:
+      aliases:
+        - "{{ RCLONEGW_HOST }}"
+rclonegw-public:
+  ports:
+    - "127.0.0.1:9002:9000"

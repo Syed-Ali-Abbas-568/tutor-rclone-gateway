@@ -1,0 +1,81 @@
+# rclone (https://rclone.org) as an S3-to-Azure-Blob-Storage gateway.
+#
+# Two `rclone serve s3` processes share one Azure Blob Storage account:
+# `rclonegw` requires credentials and can read/write every bucket.
+# `rclonegw-public` has no credentials at all, is `--read-only`, and is
+# scoped with `--include` to only the bucket(s) that must be anonymously
+# readable (forum image uploads are rendered as plain <img> tags baked
+# permanently into stored post HTML, so presigned URLs don't work for
+# them — they would eventually expire). The `caddyfile` patch routes
+# GET/HEAD on the public bucket's path to `rclonegw-public` and everything
+# else to `rclonegw`, so Open edX only ever talks to one hostname. See
+# EVALUATION.md for why this two-process split exists at all: rclone's
+# `serve s3` has no bucket-level ACL/policy mechanism, unlike RustFS/MinIO.
+#
+# `--dir-cache-time=0` on both: the default 5-minute cache would otherwise
+# let a process started before `tutor local do init` creates the Azure
+# containers keep serving a stale, empty bucket list until the cache
+# expires.
+#
+# Azure containers stay fully private at the Azure IAM layer the whole
+# time; nothing here ever changes a native Azure ACL — "public" is purely
+# a property of this two-process topology. Unlike RustFS/MinIO, no object
+# data lives on local disk, so there is no bind-mounted volume, no
+# non-root/chown dance, and nothing here to back up outside of Azure
+# itself.
+rclonegw:
+  image: {{ RCLONEGW_DOCKER_IMAGE }}
+  user: "{{ RCLONEGW_UID }}:{{ RCLONEGW_GID }}"
+  command:
+    - serve
+    - s3
+    - "azureblob:"
+    - --addr=:9000
+    - --auth-key={{ OPENEDX_AWS_ACCESS_KEY }},{{ OPENEDX_AWS_SECRET_ACCESS_KEY }}
+    - --vfs-cache-mode=off
+    - --dir-cache-time=0
+  environment:
+    RCLONE_CONFIG_AZUREBLOB_TYPE: "azureblob"
+    RCLONE_CONFIG_AZUREBLOB_ACCOUNT: "{{ RCLONEGW_AZURE_ACCOUNT }}"
+    RCLONE_CONFIG_AZUREBLOB_KEY: "{{ RCLONEGW_AZURE_ACCOUNT_KEY }}"
+    RCLONE_CONFIG_AZUREBLOB_ENDPOINT: "{{ RCLONEGW_AZURE_ENDPOINT }}"
+  depends_on: ["azurite"]
+  restart: unless-stopped
+
+# Anonymous, read-only, scoped to the public bucket(s) only. No
+# --auth-key at all: this process is reachable with zero credentials by
+# design. --read-only blocks every write path at the VFS layer (object
+# PUT/DELETE *and* CreateBucket/DeleteBucket). --include scopes the served
+# tree so that even a caller reaching this container directly — bypassing
+# Caddy's method+path routing entirely — cannot see or address any bucket
+# other than the public one(s).
+rclonegw-public:
+  image: {{ RCLONEGW_DOCKER_IMAGE }}
+  user: "{{ RCLONEGW_UID }}:{{ RCLONEGW_GID }}"
+  command:
+    - serve
+    - s3
+    - "azureblob:"
+    - --addr=:9000
+    - --read-only
+    - --vfs-cache-mode=off
+    - --dir-cache-time=0
+    - --include=/{{ RCLONEGW_BUCKET_NAME }}/**
+    {% if RCLONEGW_DISCOVERY_BUCKET_NAME %}- --include=/{{ RCLONEGW_DISCOVERY_BUCKET_NAME }}/**{% endif %}
+  environment:
+    RCLONE_CONFIG_AZUREBLOB_TYPE: "azureblob"
+    RCLONE_CONFIG_AZUREBLOB_ACCOUNT: "{{ RCLONEGW_AZURE_ACCOUNT }}"
+    RCLONE_CONFIG_AZUREBLOB_KEY: "{{ RCLONEGW_AZURE_ACCOUNT_KEY }}"
+    RCLONE_CONFIG_AZUREBLOB_ENDPOINT: "{{ RCLONEGW_AZURE_ENDPOINT }}"
+  depends_on: ["azurite"]
+  restart: unless-stopped
+
+# Azurite: Microsoft's own local Azure Storage emulator. Backs the gateway
+# by default so `tutor local launch` needs no real Azure account. Override
+# RCLONEGW_AZURE_ACCOUNT / RCLONEGW_AZURE_ACCOUNT_KEY / RCLONEGW_AZURE_ENDPOINT
+# together to point at real Azure instead; this service is harmless but
+# unused in that case.
+azurite:
+  image: {{ RCLONEGW_AZURITE_DOCKER_IMAGE }}
+  command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000"]
+  restart: unless-stopped

@@ -1,0 +1,4 @@
+# Dev mode runs no Caddy, so RCLONEGW_HOST (which Caddy would otherwise
+# resolve and route) is not reachable as-is: hit the authenticated
+# gateway's published port directly instead. See local-docker-compose-dev-services.
+AWS_S3_ENDPOINT_URL = "{{ "https" if ENABLE_HTTPS else "http" }}://{{ RCLONEGW_HOST }}:9000"

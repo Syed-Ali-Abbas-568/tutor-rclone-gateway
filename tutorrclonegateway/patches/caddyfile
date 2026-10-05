@@ -1,0 +1,66 @@
+# rclone S3 gateway. Two backends share this one hostname: GET/HEAD
+# requests on the public bucket's path go to the unauthenticated,
+# read-only, --include-scoped rclonegw-public; everything else (including
+# signed requests against private buckets) goes to the authenticated
+# rclonegw. See local-docker-compose-services for why this two-process
+# split exists at all: rclone's `serve s3` has no bucket-level ACL/policy
+# mechanism, unlike RustFS/MinIO.
+#
+# This uses `reverse_proxy` directly rather than Tutor's own `import
+# proxy "host:port"` snippet. That snippet bundles a `log` directive,
+# which Caddy rejects inside a `handle` block ("directive 'log' is not
+# an ordered HTTP handler") — confirmed by actually starting this stack,
+# not caught by any offline test. `handle`'s first-match-wins semantics
+# are exactly what the public/private split needs, so logging and
+# compression are hoisted to the site level instead, applying to both
+# backends uniformly rather than duplicated per branch.
+#
+# CORS is set here, at the proxy, rather than via rclone's own
+# --allow-origin flag: that flag's documentation ties it to rclone's
+# WebDAV/remote-control code path with no confirmation it applies to the
+# `serve s3` handler chain at all. A Caddy header directive is certain to
+# work regardless. The `*` mirrors MinIO/RustFS's own default permissive
+# CORS behavior, which Open edX's MFEs already depend on for direct
+# fetch/XHR beyond plain <img> tags (this is not a new, wider posture than
+# what tutor-rustfs already provides).
+#
+# The discovery-bucket clause in the path matcher is conditional on
+# purpose. RCLONEGW_DISCOVERY_BUCKET_NAME renders to an empty string when
+# the `discovery` plugin is disabled, and an *unguarded* second path token
+# would collapse this matcher to a bare "/*" — routing every bucket,
+# including grades and ORA2 uploads, to the unauthenticated backend. Do
+# not remove the conditional guard below, and see test_patches.py for the
+# regression test that renders this with discovery disabled.
+{{ RCLONEGW_HOST }}{$default_site_port} {
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                common_log delete
+                request>headers delete
+                resp_headers delete
+                tls delete
+            }
+        }
+    }
+    encode gzip
+
+    header Access-Control-Allow-Origin *
+    header Access-Control-Expose-Headers "Content-Range,Accept-Ranges,ETag"
+
+    @public_read {
+        method GET HEAD
+        path /{{ RCLONEGW_BUCKET_NAME }}/*{% if RCLONEGW_DISCOVERY_BUCKET_NAME %} /{{ RCLONEGW_DISCOVERY_BUCKET_NAME }}/*{% endif %}
+    }
+    handle @public_read {
+        reverse_proxy rclonegw-public:9000 {
+            header_up X-Forwarded-Port 80
+        }
+    }
+    handle {
+        reverse_proxy rclonegw:9000 {
+            header_up X-Forwarded-Port 80
+        }
+    }
+}

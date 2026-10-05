@@ -1,0 +1,45 @@
+---
+# ClusterIP, not NodePort: neither gateway needs to be reachable from
+# outside the cluster, only from the Caddy pod (see k8s-networkpolicy).
+# tutor-rustfs's storage Service uses NodePort because RustFS has no
+# "this bucket is public, this one isn't" distinction to protect in the
+# first place; this plugin does, so it deliberately doesn't inherit that
+# pattern.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rclonegw
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      protocol: TCP
+      name: s3-api
+  selector:
+    app.kubernetes.io/name: rclonegw
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rclonegw-public
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      protocol: TCP
+      name: s3-api
+  selector:
+    app.kubernetes.io/name: rclonegw-public
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azurite
+spec:
+  type: ClusterIP
+  ports:
+    - port: 10000
+      protocol: TCP
+      name: blob
+  selector:
+    app.kubernetes.io/name: azurite

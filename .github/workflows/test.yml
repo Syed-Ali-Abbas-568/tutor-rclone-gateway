@@ -1,0 +1,74 @@
+name: Run tests
+
+on:
+  pull_request:
+    branches: [ release, main ]
+  push:
+    branches: [ release, main ]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Test lint, types, format and templates
+        run: make test-lint test-format test-types test-unit
+      - name: Test python package
+        # twine>=7.0.0 (needed for Metadata-Version 2.5 support) requires
+        # Python >=3.10, so only run this check on the newer interpreter.
+        if: matrix.python-version != '3.9'
+        run: |
+          pip install build "twine>=7.0.0"
+          make test-pythonpackage
+
+  live-conformance:
+    # Safe to run on every PR, including from forks: Azurite needs zero
+    # secrets, unlike a real Azure account. tutor-rustfs's CI runs no
+    # live tests at all for exactly that reason; this plugin can go
+    # further here specifically because of what it defaults to. Real
+    # Azure stays a manual, secrets-gated tier (see TESTING.rst), never
+    # wired in here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install boto3 requests pytest
+      - name: Start Azurite and gateway services
+        run: docker compose -f tests/docker-compose.ci.yml up -d azurite rclonegw rclonegw-public caddy
+      - name: Wait for the gateway to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:8099/ && break
+            sleep 1
+          done
+      - name: Provision Azure containers
+        run: docker compose -f tests/docker-compose.ci.yml run --rm init
+      - name: Run live conformance suite
+        env:
+          RCLONEGW_TEST_ENDPOINT: http://localhost:8099
+          RCLONEGW_TEST_PUBLIC_HOST: http://localhost:8099
+          RCLONEGW_TEST_PUBLIC_DIRECT_ENDPOINT: http://localhost:9002
+          RCLONEGW_TEST_ACCESS_KEY: openedx
+          RCLONEGW_TEST_SECRET_KEY: test-secret-key-for-ci-only
+          RCLONEGW_TEST_BUCKET: openedx
+          RCLONEGW_TEST_PRIVATE_BUCKET: openedxgrades
+        # multipart_server_side_copy and the real-Azure gate are opted
+        # out of by default (see their skipif reasons); nothing here
+        # needs to exclude them explicitly.
+        run: pytest -v tests/test_s3_conformance.py
+      - name: Dump gateway logs on failure
+        if: failure()
+        run: docker compose -f tests/docker-compose.ci.yml logs

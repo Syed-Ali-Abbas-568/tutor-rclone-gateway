@@ -1,0 +1,66 @@
+# Standalone Azurite + rclone gateway stack for CI's live conformance
+# job. Deliberately NOT generated via Tutor's rendering pipeline — that's
+# what the offline test_patches.py tier exists to keep honest against the
+# real templates. This file exists purely to give test_s3_conformance.py
+# something to run against on every PR, with zero secrets, since Azurite
+# needs none. Caddyfile.ci hand-mirrors the routing logic of the real
+# `caddyfile` patch (method+path split, CORS) without Tutor's Jinja
+# templating or `import proxy` macro.
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000"]
+
+  rclonegw:
+    image: docker.io/rclone/rclone:1.75.1
+    command:
+      - serve
+      - s3
+      - "azureblob:"
+      - --addr=:9000
+      - --auth-key=openedx,test-secret-key-for-ci-only
+      - --vfs-cache-mode=off
+      - --dir-cache-time=0
+    environment: &azureblob-env
+      RCLONE_CONFIG_AZUREBLOB_TYPE: "azureblob"
+      RCLONE_CONFIG_AZUREBLOB_ACCOUNT: "devstoreaccount1"
+      RCLONE_CONFIG_AZUREBLOB_KEY: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+      RCLONE_CONFIG_AZUREBLOB_ENDPOINT: "http://azurite:10000/devstoreaccount1"
+    depends_on: ["azurite"]
+
+  rclonegw-public:
+    image: docker.io/rclone/rclone:1.75.1
+    command:
+      - serve
+      - s3
+      - "azureblob:"
+      - --addr=:9000
+      - --read-only
+      - --vfs-cache-mode=off
+      - --dir-cache-time=0
+      - --include=/openedx/**
+    environment: *azureblob-env
+    ports:
+      - "9002:9000"
+    depends_on: ["azurite"]
+
+  init:
+    image: docker.io/rclone/rclone:1.75.1
+    entrypoint: ["sh", "-e", "-c"]
+    command:
+      - |
+        rclone mkdir azureblob:openedx
+        rclone mkdir azureblob:openedxuploads
+        rclone mkdir azureblob:openedxvideos
+        rclone mkdir azureblob:openedxgrades
+        rclone mkdir azureblob:openedxlearning
+    environment: *azureblob-env
+    depends_on: ["azurite"]
+
+  caddy:
+    image: caddy:2
+    volumes:
+      - ./Caddyfile.ci:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8099:80"
+    depends_on: ["rclonegw", "rclonegw-public"]

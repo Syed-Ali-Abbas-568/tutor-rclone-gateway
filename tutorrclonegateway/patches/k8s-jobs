@@ -1,0 +1,29 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Must be `<service>-job` to match the name registered with
+  # CLI_DO_INIT_TASKS in plugin.py ("rclonegw").
+  name: rclonegw-job
+  labels:
+    app.kubernetes.io/component: job
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        # Bucket (Azure container) creation talks straight to Azure via
+        # the azureblob: remote, not through either gateway Deployment —
+        # the same single pinned image is its own admin client.
+        - name: rclonegw
+          image: {{ RCLONEGW_DOCKER_IMAGE }}
+          command: []
+          env:
+            - name: RCLONE_CONFIG_AZUREBLOB_TYPE
+              value: "azureblob"
+            - name: RCLONE_CONFIG_AZUREBLOB_ACCOUNT
+              value: "{{ RCLONEGW_AZURE_ACCOUNT }}"
+            - name: RCLONE_CONFIG_AZUREBLOB_KEY
+              value: "{{ RCLONEGW_AZURE_ACCOUNT_KEY }}"
+            - name: RCLONE_CONFIG_AZUREBLOB_ENDPOINT
+              value: "{{ RCLONEGW_AZURE_ENDPOINT }}"
