@@ -27,10 +27,16 @@ account behind it.
    family, `tutor-rustfs <https://github.com/edly-io/tutor-rustfs>`_ — never
    had one. Open edX's own community already hit a serious failure running
    almost exactly this architecture with MinIO's gateway mode in front of
-   Azure Blob Storage: multipart course-export uploads failed to complete,
-   and the only fix anyone found was abandoning the gateway approach
-   entirely. This plugin's own finding, above, rhymes with that one closely
-   enough to take seriously.
+   Azure Blob Storage: multipart course-export uploads failed to complete
+   with "One or more of the specified parts could not be found," traced to
+   Azure Storage itself (not MongoDB, not file size) and reproduced on
+   Tutor's own Kubernetes deployment — see `the forum thread
+   <https://discuss.openedx.org/t/tutor-qunice-minio-as-gateway-for-azure-storage-issues/12995>`_
+   and the `earlier report of the same symptom
+   <https://discuss.openedx.org/t/multipart-upload-failure-with-minio-azure-gateway/16582>`_.
+   The only fix anyone found was abandoning the gateway approach entirely
+   (``MINIO_GATEWAY: null``) and running MinIO standalone. This plugin's own
+   finding, above, rhymes with that one closely enough to take seriously.
 
 Which plugin do I want?
 -----------------------

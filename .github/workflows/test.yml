@@ -45,7 +45,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install test dependencies
-        run: pip install boto3 requests pytest
+        # tests/conftest.py imports `tutor` (and is auto-loaded for every
+        # test in this directory, including this file) and the autouse
+        # _loaded_plugin fixture requires this package itself to be
+        # installed so "rclonegateway" shows up as a discoverable plugin
+        # — `pip install -e ".[dev]"` covers both, matching the `tests`
+        # job above. boto3/requests aren't in the dev extras (kept out so
+        # a plain template-check contributor isn't forced to install
+        # them), so they're added here explicitly.
+        run: |
+          pip install -e ".[dev]"
+          pip install boto3 requests
       - name: Start Azurite and gateway services
         run: docker compose -f tests/docker-compose.ci.yml up -d azurite rclonegw rclonegw-public caddy
       - name: Wait for the gateway to accept connections
